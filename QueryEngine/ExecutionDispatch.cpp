@@ -545,6 +545,9 @@ const int8_t* Executor::ExecutionDispatch::getScanColumn(
   CHECK(fragments_it != all_tables_fragments.end());
   const auto fragments = fragments_it->second;
   const auto& fragment = (*fragments)[frag_id];
+  if (!fragment.getPhysicalNumTuples()) {
+    return nullptr;
+  }
   std::shared_ptr<Chunk_NS::Chunk> chunk;
   auto chunk_meta_it = fragment.getChunkMetadataMap().find(col_id);
   CHECK(chunk_meta_it != fragment.getChunkMetadataMap().end());
@@ -614,7 +617,11 @@ const int8_t* Executor::ExecutionDispatch::getAllScanColumnFrags(
         std::list<std::shared_ptr<Chunk_NS::Chunk>> chunk_holder;
         std::list<ChunkIter> chunk_iter_holder;
         const auto& fragment = (*fragments)[frag_id];
+        if (!fragment.getPhysicalNumTuples()) {
+          continue;
+        }
         auto chunk_meta_it = fragment.getChunkMetadataMap().find(col_id);
+        CHECK(chunk_meta_it != fragment.getChunkMetadataMap().end());
         auto col_buffer = getScanColumn(table_id,
                                         static_cast<int>(frag_id),
                                         col_id,
@@ -847,6 +854,9 @@ std::pair<const int8_t*, size_t> Executor::ExecutionDispatch::getColumnFragment(
     ColumnCacheMap& column_cache) {
   static std::mutex columnar_conversion_mutex;
   auto chunk_meta_it = fragment.getChunkMetadataMap().find(hash_col.get_column_id());
+  if (!fragment.getPhysicalNumTuples()) {
+    return {nullptr, 0};
+  }
   CHECK(chunk_meta_it != fragment.getChunkMetadataMap().end());
   const auto& catalog = *executor->getCatalog();
   const auto cd = get_column_descriptor_maybe(hash_col.get_column_id(), hash_col.get_table_id(), catalog);
@@ -912,7 +922,9 @@ std::pair<const int8_t*, size_t> Executor::ExecutionDispatch::getAllColumnFragme
     size_t elem_count = 0;
     std::tie(col_frag, elem_count) =
         getColumnFragment(executor, hash_col, frag, Data_Namespace::CPU_LEVEL, 0, chunks_owner, column_cache);
-    CHECK(col_frag != nullptr);
+    if (col_frag == nullptr) {
+      continue;
+    }
     CHECK_NE(elem_count, size_t(0));
     col_frags.push_back(col_frag);
     elem_counts.push_back(elem_count);
